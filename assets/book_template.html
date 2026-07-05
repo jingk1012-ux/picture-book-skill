@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__TITLE__</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: "PingFang SC","Microsoft YaHei","Hiragino Sans GB",sans-serif;
+    background: linear-gradient(160deg,#ffeedd 0%,#ffe3ec 50%,#e3f2ff 100%);
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px;
+  }
+  .book {
+    width:min(880px,100%); background:#fffdf7; border-radius:28px;
+    box-shadow:0 18px 50px rgba(140,90,60,.22); overflow:hidden; position:relative;
+  }
+  .page { display:none; animation:pop .45s ease; }
+  .page.active { display:block; }
+  @keyframes pop { from { opacity:0; transform:translateX(28px);} to { opacity:1; transform:none;} }
+  .art { width:100%; background:#fff; border-bottom:6px dotted #ffd9a0; }
+  .art svg { width:100%; height:auto; display:block; }
+  .content { padding:26px 34px 20px; text-align:center; }
+  .content p { font-size:clamp(19px,2.6vw,25px); line-height:1.75; color:#5a4632; letter-spacing:.5px; }
+  .cover .content h1 { font-size:clamp(30px,5vw,44px); color:#e2733a; margin-bottom:8px; }
+  .cover .content h2 { font-size:clamp(15px,2.2vw,19px); color:#a0886b; font-weight:normal; margin-bottom:6px; }
+  .badge { display:inline-block; background:#ffe9c7; color:#c07830; border-radius:999px; padding:4px 14px; font-size:14px; margin-bottom:14px; }
+  .btn {
+    border:none; cursor:pointer; border-radius:999px; font-family:inherit;
+    transition:transform .12s, box-shadow .12s;
+  }
+  .btn:active { transform:scale(.94); }
+  .btn:focus-visible { outline:3px solid #385e98; outline-offset:3px; }
+  .btn-big {
+    background:#ff9d4d; color:#fff; font-size:21px; padding:14px 44px;
+    box-shadow:0 6px 0 #e07f2e; margin:10px 0 6px;
+  }
+  .btn-play {
+    background:#6bc86b; color:#fff; font-size:17px; padding:10px 26px;
+    box-shadow:0 5px 0 #4da34d; margin-top:14px;
+  }
+  .btn-play.playing { background:#f4766e; box-shadow:0 5px 0 #c9534c; }
+  .nav {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 22px 20px; gap:10px;
+  }
+  .btn-nav {
+    background:#ffd9a0; color:#9a6a2f; font-size:18px; padding:9px 22px; box-shadow:0 4px 0 #e6b877;
+  }
+  .btn-nav:disabled { opacity:.35; cursor:default; box-shadow:none; }
+  .dots { display:flex; gap:7px; flex-wrap:wrap; justify-content:center; }
+  .dot { width:11px; height:11px; border-radius:50%; background:#eadbc4; cursor:pointer; transition:.2s; }
+  .dot.on { background:#ff9d4d; transform:scale(1.35); }
+  .toolbar { position:absolute; top:14px; right:16px; z-index:5; }
+  .btn-auto { background:#8fb8f0; color:#fff; font-size:14px; padding:8px 16px; box-shadow:0 4px 0 #6c93c9; }
+  .btn-auto.on { background:#f4766e; box-shadow:0 4px 0 #c9534c; }
+  .pageno { font-size:13px; color:#c4ab88; margin-top:10px; }
+  .end-emoji { font-size:56px; margin:6px 0 10px; }
+  @media (max-width:560px) {
+    body { padding:8px; }
+    .book { border-radius:18px; }
+    .content { padding:22px 20px 16px; }
+    .nav { padding:12px 12px 16px; }
+    .btn-nav { padding:9px 14px; font-size:16px; }
+    .toolbar { top:10px; right:10px; }
+  }
+</style>
+</head>
+<body>
+<div class="book">
+  <div class="toolbar"><button class="btn btn-auto" id="autoBtn" type="button" onclick="toggleAuto()">…</button></div>
+  <div id="pages" aria-live="polite"></div>
+  <div class="nav" aria-label="Page navigation">
+    <button class="btn btn-nav" id="prevBtn" type="button" onclick="go(-1)"></button>
+    <div class="dots" id="dots" aria-label="Page selector"></div>
+    <button class="btn btn-nav" id="nextBtn" type="button" onclick="go(1)"></button>
+  </div>
+</div>
+<script>
+const BOOK = __BOOK_DATA__;
+const LANG = BOOK.lang || 'zh-CN';
+const EN = /^en/i.test(LANG);
+const T = EN ? {
+  listen:'🔊 Read to me', stop:'⏹ Stop', open:'Open the book 📖', again:'Read again 🔄',
+  prev:'← Back', next:'Next →', auto:'▶ Read the whole book', autoStop:'⏹ Stop auto-read',
+  theEnd:'— The End —', endText:'Thanks for reading. Good night!', ages:'Ages',
+  noTts:'This browser does not support read-aloud. Please try Chrome or Edge.'
+} : {
+  listen:'🔊 点我听故事', stop:'⏹ 停止', open:'翻开故事 📖', again:'再读一遍 🔄',
+  prev:'← 上一页', next:'下一页 →', auto:'▶ 自动朗读整本', autoStop:'⏹ 停止自动朗读',
+  theEnd:'— 完 —', endText:'谢谢你读完这个故事，晚安！', ages:'适合',
+  noTts:'这个浏览器不支持朗读，请换 Chrome 或 Edge 试试'
+};
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  })[char]);
+}
+function textHtml(value) {
+  return escapeHtml(value).replace(/\r?\n/g, '<br>');
+}
+function svgHtml(value) {
+  return typeof value === 'string' ? value : '';
+}
+function el(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  return d.firstElementChild;
+}
+
+/* ---------- Render ---------- */
+const pagesEl = document.getElementById('pages');
+const dotsEl = document.getElementById('dots');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const total = BOOK.pages.length + 2; // cover + story + ending
+let cur = 0;
+let auto = false;
+
+prevBtn.textContent = T.prev;
+nextBtn.textContent = T.next;
+prevBtn.setAttribute('aria-label', T.prev);
+nextBtn.setAttribute('aria-label', T.next);
+
+pagesEl.appendChild(el(`<div class="page cover active">
+  <div class="art">${svgHtml(BOOK.cover_svg)}</div>
+  <div class="content">
+    <h1>${escapeHtml(BOOK.title)}</h1>
+    <h2>${escapeHtml(BOOK.subtitle || '')}</h2>
+    <div class="badge">${escapeHtml(T.ages)} ${escapeHtml(BOOK.age || (EN ? '3–6' : '3–6岁'))}</div><br>
+    <button class="btn btn-big" type="button" onclick="go(1)">${escapeHtml(T.open)}</button>
+  </div>
+</div>`));
+
+BOOK.pages.forEach((p, i) => {
+  pagesEl.appendChild(el(`<div class="page">
+    <div class="art">${svgHtml(p.svg)}</div>
+    <div class="content">
+      <p>${textHtml(p.text)}</p>
+      <button class="btn btn-play" type="button" data-idx="${i}" onclick="togglePlay(${i}, this)">${escapeHtml(T.listen)}</button>
+      <div class="pageno">${i + 1} / ${BOOK.pages.length}</div>
+    </div>
+  </div>`));
+});
+
+pagesEl.appendChild(el(`<div class="page">
+  <div class="content" style="padding:70px 34px;">
+    <div class="end-emoji" aria-hidden="true">🌙✨</div>
+    <h1 style="color:#e2733a;font-size:34px;margin-bottom:14px;">${escapeHtml(T.theEnd)}</h1>
+    <p>${textHtml(BOOK.end_text || T.endText)}</p>
+    <button class="btn btn-big" type="button" onclick="goto0()">${escapeHtml(T.again)}</button>
+  </div>
+</div>`));
+
+for (let i = 0; i < total; i++) {
+  const d = document.createElement('button');
+  d.type = 'button';
+  d.className = 'dot' + (i === 0 ? ' on' : '');
+  d.setAttribute('aria-label', EN ? `Go to page ${i + 1}` : `转到第 ${i + 1} 页`);
+  d.onclick = () => show(i);
+  dotsEl.appendChild(d);
+}
+
+function show(i) {
+  stopSound();
+  cur = Math.max(0, Math.min(total - 1, i));
+  document.querySelectorAll('.page').forEach((p, k) => p.classList.toggle('active', k === cur));
+  document.querySelectorAll('.dot').forEach((d, k) => d.classList.toggle('on', k === cur));
+  prevBtn.disabled = cur === 0;
+  nextBtn.disabled = cur === total - 1;
+  if (auto) autoRead();
+}
+function go(delta) { show(cur + delta); }
+function goto0() { auto = false; syncAutoBtn(); show(0); }
+document.addEventListener('keydown', event => {
+  if (event.key === 'ArrowRight') go(1);
+  if (event.key === 'ArrowLeft') go(-1);
+});
+
+/* ---------- Player: embedded audio first, browser speech fallback ---------- */
+let curAudio = null;
+let curBtn = null;
+let curUtter = null;
+let playToken = 0;
+
+function pickVoice() {
+  const voices = speechSynthesis.getVoices();
+  const base = LANG.split(/[-_]/)[0].toLowerCase();
+  const preferred = EN ? /Aria|Jenny|Samantha|Google US English|Natural/i : /Xiaoxiao|Yunxi|普通话|Mainland/i;
+  return voices.find(v => v.lang.replace('_', '-').toLowerCase() === LANG.toLowerCase() && preferred.test(v.name))
+      || voices.find(v => v.lang.replace('_', '-').toLowerCase() === LANG.toLowerCase())
+      || voices.find(v => v.lang.toLowerCase().startsWith(base))
+      || null;
+}
+if ('speechSynthesis' in window) speechSynthesis.getVoices();
+
+function stopSound() {
+  playToken += 1;
+  if (curAudio) {
+    curAudio.onended = null;
+    curAudio.onerror = null;
+    curAudio.pause();
+    curAudio = null;
+  }
+  if (curUtter) {
+    curUtter.onstart = null;
+    curUtter.onend = null;
+    curUtter.onerror = null;
+    curUtter = null;
+  }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (curBtn) {
+    curBtn.classList.remove('playing');
+    curBtn.textContent = T.listen;
+    curBtn = null;
+  }
+}
+
+function playPage(i, btn, onEnd) {
+  stopSound();
+  const token = playToken;
+  const page = BOOK.pages[i];
+  const done = ok => {
+    if (token !== playToken) return;
+    if (btn) {
+      btn.classList.remove('playing');
+      btn.textContent = T.listen;
+    }
+    curBtn = null;
+    curAudio = null;
+    curUtter = null;
+    if (onEnd) onEnd(ok !== false);
+  };
+  if (btn) {
+    btn.classList.add('playing');
+    btn.textContent = T.stop;
+    curBtn = btn;
+  }
+  if (page.audio) {
+    curAudio = new Audio(page.audio);
+    curAudio.onended = () => done(true);
+    curAudio.onerror = () => {
+      curAudio = null;
+      speak(page.text, done, token);
+    };
+    curAudio.play().catch(() => {
+      curAudio = null;
+      speak(page.text, done, token);
+    });
+  } else {
+    speak(page.text, done, token);
+  }
+}
+
+function speak(text, done, token) {
+  if (!('speechSynthesis' in window)) {
+    alert(T.noTts);
+    done(false);
+    return;
+  }
+  const utterance = new SpeechSynthesisUtterance(String(text || '').replace(/<[^>]+>/g, ''));
+  utterance.lang = LANG;
+  utterance.rate = 0.85;
+  utterance.pitch = 1.1;
+  const voice = pickVoice();
+  if (voice) utterance.voice = voice;
+  let started = false;
+  const startedAt = Date.now();
+  utterance.onstart = () => { started = true; };
+  utterance.onend = () => done(started || Date.now() - startedAt > 500);
+  utterance.onerror = () => done(false);
+  curUtter = utterance;
+  speechSynthesis.speak(utterance);
+}
+
+function togglePlay(i, btn) {
+  if (curBtn === btn) {
+    auto = false;
+    syncAutoBtn();
+    stopSound();
+    return;
+  }
+  auto = false;
+  syncAutoBtn();
+  playPage(i, btn, null);
+}
+
+/* ---------- Auto-read ---------- */
+function syncAutoBtn() {
+  const button = document.getElementById('autoBtn');
+  button.classList.toggle('on', auto);
+  button.textContent = auto ? T.autoStop : T.auto;
+  button.setAttribute('aria-label', button.textContent);
+}
+function toggleAuto() {
+  auto = !auto;
+  syncAutoBtn();
+  if (auto) {
+    if (cur === 0 || cur === total - 1) show(1);
+    else autoRead();
+  } else {
+    stopSound();
+  }
+}
+function autoRead() {
+  if (!auto) return;
+  if (cur === 0 || cur === total - 1) {
+    auto = false;
+    syncAutoBtn();
+    return;
+  }
+  const idx = cur - 1;
+  const pageAtStart = cur;
+  const btn = document.querySelector(`.btn-play[data-idx="${idx}"]`);
+  playPage(idx, btn, ok => {
+    if (!ok) {
+      auto = false;
+      syncAutoBtn();
+      return;
+    }
+    if (auto && cur === pageAtStart) {
+      setTimeout(() => {
+        if (auto && cur === pageAtStart) go(1);
+      }, 700);
+    }
+  });
+}
+
+syncAutoBtn();
+show(0);
+</script>
+</body>
+</html>
