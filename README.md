@@ -1,6 +1,6 @@
 # Kids Picture Book Skill
 
-![Kids Picture Book Skill](Screenshot%202026-07-05%20175347.png)
+![Kids Picture Book Skill](cover.png)
 
 A reusable AI-agent skill for turning a topic or story idea into an interactive children's picture book. It produces one self-contained HTML file with page-by-page text, original inline SVG illustrations, navigation, per-page narration, and auto-read mode.
 
